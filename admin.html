@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin Panel - OIS Property</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+        body { background: #f0f2f5; padding: 20px; }
+        .container { max-width: 800px; margin: auto; background: white; border-radius: 20px; padding: 30px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); }
+        h2 { color: #2c3e50; margin-bottom: 20px; }
+        input, select, button { width: 100%; padding: 12px; margin: 8px 0; border-radius: 8px; border: 1px solid #ccc; }
+        button { background: #e67e22; color: white; font-weight: bold; border: none; cursor: pointer; }
+        button:hover { background: #d35400; }
+        .preview-img { max-width: 100%; margin: 10px 0; border-radius: 10px; }
+        .login-box { text-align: center; }
+        .logout-btn { background: #e74c3c; margin-top: 20px; }
+        .property-list { margin-top: 30px; }
+        .property-item { border-bottom: 1px solid #ddd; padding: 10px 0; }
+    </style>
+</head>
+<body>
+    <div id="adminApp" class="container">
+        <div v-if="!isLoggedIn">
+            <h2>Admin Login</h2>
+            <input type="password" v-model="password" placeholder="Enter Password">
+            <button @click="login">Login</button>
+            <p style="color:red">{{error}}</p>
+        </div>
+        <div v-else>
+            <h2>🏢 Add New Property</h2>
+            <select v-model="newProperty.state">
+                <option disabled value="">Select State</option>
+                <option>Maharashtra</option><option>Delhi</option><option>Karnataka</option><option>Tamil Nadu</option><option>Gujarat</option>
+            </select>
+            <input v-model="newProperty.city" placeholder="City (e.g., Mumbai)">
+            <input v-model="newProperty.propertyName" placeholder="Property Name">
+            <input v-model="newProperty.location" placeholder="Full Location (optional)">
+            <input type="number" v-model="newProperty.budget" placeholder="Budget in ₹">
+            <input type="file" @change="handleImageUpload" accept="image/*">
+            <div v-if="imagePreview"><img :src="imagePreview" class="preview-img" width="200"></div>
+            <button @click="submitProperty" :disabled="uploading">{{uploading ? 'Uploading...' : 'Add Property'}}</button>
+            <button @click="logout" class="logout-btn">Logout</button>
+
+            <hr>
+            <h3>Existing Properties</h3>
+            <div class="property-list">
+                <div v-for="prop in properties" :key="prop.id" class="property-item">
+                    <strong>{{prop.propertyName}}</strong> - {{prop.city}}, {{prop.state}} - ₹{{prop.budget.toLocaleString()}}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script>
+        const { createApp, ref, onMounted } = Vue;
+        createApp({
+            setup() {
+                const isLoggedIn = ref(false);
+                const password = ref('');
+                const error = ref('');
+                const newProperty = ref({ state: '', city: '', propertyName: '', location: '', budget: '' });
+                const imageFile = ref(null);
+                const imagePreview = ref('');
+                const uploading = ref(false);
+                const properties = ref([]);
+
+                const checkStatus = async () => {
+                    const res = await fetch('/api/admin-status');
+                    const data = await res.json();
+                    isLoggedIn.value = data.isAdmin;
+                    if(isLoggedIn.value) fetchProperties();
+                };
+                const fetchProperties = async () => {
+                    const res = await fetch('/api/properties');
+                    properties.value = await res.json();
+                };
+                const login = async () => {
+                    const res = await fetch('/api/admin-login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ password: password.value })
+                    });
+                    if(res.ok) {
+                        isLoggedIn.value = true;
+                        error.value = '';
+                        fetchProperties();
+                    } else {
+                        error.value = 'Wrong password';
+                    }
+                };
+                const logout = async () => {
+                    await fetch('/api/admin-logout', { method: 'POST' });
+                    isLoggedIn.value = false;
+                };
+                const handleImageUpload = (e) => {
+                    const file = e.target.files[0];
+                    if(file) {
+                        imageFile.value = file;
+                        imagePreview.value = URL.createObjectURL(file);
+                    }
+                };
+                const submitProperty = async () => {
+                    if(!newProperty.value.state || !newProperty.value.city || !newProperty.value.propertyName || !newProperty.value.budget || !imageFile.value) {
+                        alert('Please fill all fields and select image');
+                        return;
+                    }
+                    uploading.value = true;
+                    const formData = new FormData();
+                    formData.append('image', imageFile.value);
+                    const uploadRes = await fetch('/api/upload-image', { method: 'POST', body: formData });
+                    const uploadData = await uploadRes.json();
+                    if(!uploadData.success) {
+                        alert('Image upload failed');
+                        uploading.value = false;
+                        return;
+                    }
+                    const propertyData = {
+                        ...newProperty.value,
+                        budget: parseInt(newProperty.value.budget),
+                        imageUrl: uploadData.url
+                    };
+                    const addRes = await fetch('/api/add-property', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(propertyData)
+                    });
+                    if(addRes.ok) {
+                        alert('Property added!');
+                        newProperty.value = { state: '', city: '', propertyName: '', location: '', budget: '' };
+                        imageFile.value = null;
+                        imagePreview.value = '';
+                        fetchProperties();
+                    } else {
+                        alert('Failed to add property');
+                    }
+                    uploading.value = false;
+                };
+                onMounted(() => checkStatus());
+                return { isLoggedIn, password, error, newProperty, imagePreview, uploading, properties, login, logout, handleImageUpload, submitProperty };
+            }
+        }).mount('#adminApp');
+    </script>
+</body>
+</html>
